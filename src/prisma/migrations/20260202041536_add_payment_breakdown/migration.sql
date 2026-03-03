@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "payments" ADD COLUMN     "interestPaid" DECIMAL(12,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "lateFeePaid" DECIMAL(12,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "principalPaid" DECIMAL(12,2) NOT NULL DEFAULT 0;

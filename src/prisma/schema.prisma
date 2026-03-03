@@ -1,0 +1,613 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "windows"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String                     @id @default(cuid())
+  email               String                     @unique
+  passwordHash        String
+  role                UserRole                   @default(SUPER_ADMIN)
+  isActive            Boolean                    @default(true)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  lastLogin           DateTime?
+  auditLogs           AuditLog[]
+  balanceSnapshots    BalanceSnapshot[]          @relation("GeneratedBy")
+  categoryChanges     ClientCategoryTransition[] @relation("TriggeredBy")
+  clientsCreated      ClientProfile[]            @relation("CreatedBy")
+  configHistory       ConfigurationHistory[]
+  disbursmentsCreated Disbursement[]             @relation("CreatedBy")
+  documentsUploaded   Document[]                 @relation("UploadedBy")
+  loanPlansApproved   LoanRepaymentPlan[]        @relation("ApprovedBy")
+  loans               Loan[]
+  loansCreated        Loan[]                     @relation("CreatedBy")
+  moraLogsApplied     MoraApplicationLog[]       @relation("AppliedBy")
+  paymentsCreated     Payment[]                  @relation("CreatedBy")
+  superAdminProfile   SuperAdminProfile?
+  systemConfigs       SystemConfig[]
+
+  @@index([role])
+  @@index([isActive])
+  @@index([lastLogin])
+  @@map("users")
+}
+
+model SuperAdminProfile {
+  id                           String   @id @default(cuid())
+  userId                       String   @unique
+  legalName                    String
+  taxId                        String   @unique
+  whatsappNumber               String?
+  whatsappNotificationsEnabled Boolean  @default(true)
+  notificationEmail            String?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+  user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("super_admin_profiles")
+}
+
+model ClientProfile {
+  id                    String                     @id @default(cuid())
+  fullName              String
+  identificationNumber  String?                    @unique
+  phoneNumber           String?
+  secondaryPhone        String?
+  email                 String?
+  businessName          String?
+  businessType          String?
+  address               String?
+  city                  String?
+  monthlyIncome         Decimal?                   @db.Decimal(12, 2)
+  scoringPoints         Int                        @default(70)
+  categoryId            String
+  isCreditBlocked       Boolean                    @default(false)
+  lastCategoryChange    DateTime                   @updatedAt
+  createdAt             DateTime                   @default(now())
+  createdBy             String
+  isActive              Boolean                    @default(true)
+  categoryTransitions   ClientCategoryTransition[]
+  category              ClientCategory             @relation(fields: [categoryId], references: [id])
+  creator               User                       @relation("CreatedBy", fields: [createdBy], references: [id])
+  documents             Document[]
+  loans                 Loan[]
+  scoringHistory        ScoringHistory[]
+  whatsappNotifications WhatsappNotification[]
+
+  @@index([categoryId])
+  @@index([scoringPoints])
+  @@index([city])
+  @@index([createdBy])
+  @@index([isActive])
+  @@index([categoryId, scoringPoints])
+  @@index([isActive, createdAt(sort: Desc)])
+  @@index([isActive, categoryId])
+  @@index([isActive, city])
+  @@map("client_profiles")
+}
+
+model ClientCategory {
+  id               String                     @id @default(cuid())
+  name             String                     @unique
+  displayName      String
+  description      String?
+  minScore         Int
+  maxScore         Int?
+  creditMultiplier Decimal                    @db.Decimal(3, 2)
+  approvalType     ApprovalType
+  colorHex         String?
+  iconName         String?
+  priorityOrder    Int
+  isActive         Boolean                    @default(true)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  transitions      ClientCategoryTransition[]
+  newTransitions   ClientCategoryTransition[] @relation("NewCategory")
+  oldTransitions   ClientCategoryTransition[] @relation("OldCategory")
+  clientProfiles   ClientProfile[]
+
+  @@index([priorityOrder])
+  @@index([minScore, maxScore])
+  @@index([isActive, priorityOrder])
+  @@map("client_categories")
+}
+
+model ClientCategoryTransition {
+  id                String            @id @default(cuid())
+  clientId          String
+  oldCategoryId     String?
+  newCategoryId     String
+  reason            String?
+  triggeredBy       TransitionTrigger
+  triggeredByUserId String?
+  changedAt         DateTime          @default(now())
+  clientCategoryId  String?
+  clientCategory    ClientCategory?   @relation(fields: [clientCategoryId], references: [id])
+  client            ClientProfile     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  newCategory       ClientCategory    @relation("NewCategory", fields: [newCategoryId], references: [id])
+  oldCategory       ClientCategory?   @relation("OldCategory", fields: [oldCategoryId], references: [id])
+  triggeredByUser   User?             @relation("TriggeredBy", fields: [triggeredByUserId], references: [id])
+
+  @@index([clientId])
+  @@index([changedAt])
+  @@index([clientId, changedAt])
+  @@map("client_category_transitions")
+}
+
+model ScoringHistory {
+  id             String        @id @default(cuid())
+  clientId       String
+  pointsChange   Int
+  newTotalPoints Int
+  reason         String
+  triggerLoanId  String?
+  triggeredAt    DateTime      @default(now())
+  client         ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  triggerLoan    Loan?         @relation(fields: [triggerLoanId], references: [id])
+
+  @@index([clientId])
+  @@index([triggeredAt])
+  @@index([triggerLoanId])
+  @@index([clientId, triggeredAt(sort: Desc)])
+  @@map("scoring_history")
+}
+
+model Loan {
+  id                    String                 @id @default(cuid())
+  folio                 String                 @unique
+  clientId              String
+  collectorId           String?
+  principalAmount       Decimal                @db.Decimal(12, 2)
+  approvedAmount        Decimal                @db.Decimal(12, 2)
+  interestRate          Decimal                @db.Decimal(5, 2)
+  lateFeeRate           Decimal                @db.Decimal(5, 2)
+  interestTotal         Decimal                @db.Decimal(12, 2)
+  lateFeesAccrued       Decimal                @default(0) @db.Decimal(12, 2)
+  totalAmount           Decimal                @db.Decimal(12, 2)
+  termDays              Int
+  frequency             PaymentFrequency       @default(MONTHLY)
+  currency              Currency               @default(NIO)
+  statusLoan            LoanStatus             @default(PENDING)
+  approvalDate          DateTime?
+  disbursementDate      DateTime?
+  maturityDate          DateTime?
+  disbursementId        String?
+  createdAt             DateTime               @default(now())
+  createdBy             String
+  updatedAt             DateTime               @updatedAt
+  interestPaid          Decimal                @default(0) @db.Decimal(12, 2)
+  lateFeesPaid          Decimal                @default(0) @db.Decimal(12, 2)
+  principalPaid         Decimal                @default(0) @db.Decimal(12, 2)
+  remainingBalance      Decimal?               @db.Decimal(12, 2)
+  documents             Document[]
+  repaymentPlans        LoanRepaymentPlan[]
+  client                ClientProfile          @relation(fields: [clientId], references: [id])
+  collector             User?                  @relation(fields: [collectorId], references: [id])
+  creator               User                   @relation("CreatedBy", fields: [createdBy], references: [id])
+  disbursement          Disbursement?          @relation(fields: [disbursementId], references: [id])
+  moraApplications      MoraApplicationLog[]
+  paymentSchedules      PaymentSchedule[]
+  payments              Payment[]
+  scoringHistories      ScoringHistory[]
+  whatsappNotifications WhatsappNotification[]
+
+  @@index([clientId])
+  @@index([statusLoan])
+  @@index([disbursementId])
+  @@index([maturityDate, statusLoan])
+  @@index([clientId, statusLoan])
+  @@index([disbursementDate, statusLoan]) // ← Optimización para reportes por fecha
+  @@index([createdAt, statusLoan]) // ← Optimización para reportes por período
+  @@index([statusLoan, createdAt(sort: Desc)])
+  @@index([collectorId, createdAt(sort: Desc)])
+  @@index([clientId, createdAt(sort: Desc)])
+  @@map("loans")
+}
+
+model PaymentSchedule {
+  id                 String                @id @default(cuid())
+  loanId             String
+  paymentNumber      Int
+  dueDate            DateTime              @db.Date
+  principalDueAmount Decimal               @db.Decimal(12, 2)
+  interestAmount     Decimal               @db.Decimal(12, 2)
+  lateFeeAmount      Decimal               @default(0) @db.Decimal(12, 2)
+  totalDue           Decimal               @db.Decimal(12, 2)
+  paidAmount         Decimal               @default(0) @db.Decimal(12, 2)
+  remainingAmount    Decimal               @db.Decimal(12, 2)
+  status             PaymentScheduleStatus @default(PENDING)
+  paidDate           DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  moraApplications   MoraApplicationLog[]
+  loan               Loan                  @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@index([loanId])
+  @@index([dueDate])
+  @@index([status])
+  @@index([loanId, status])
+  @@index([status, dueDate])
+  @@index([loanId, status, dueDate])
+  @@map("payment_schedules")
+}
+
+model LoanRepaymentPlan {
+  id               String   @id @default(cuid())
+  loanId           String
+  originalTermDays Int
+  newTermDays      Int
+  reason           String
+  approvedByUserId String
+  effectiveDate    DateTime @db.Date
+  oldMaturityDate  DateTime @db.Date
+  newMaturityDate  DateTime @db.Date
+  createdAt        DateTime @default(now())
+  approvedBy       User     @relation("ApprovedBy", fields: [approvedByUserId], references: [id])
+  loan             Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@index([loanId])
+  @@index([effectiveDate])
+  @@map("loan_repayment_plans")
+}
+
+model Disbursement {
+  id          String   @id @default(cuid())
+  folio       String   @unique
+  amount      Decimal  @db.Decimal(12, 2)
+  currency    Currency @default(NIO)
+  disbursedAt DateTime
+  createdBy   String
+  notes       String?
+  createdAt   DateTime @default(now())
+  creator     User     @relation("CreatedBy", fields: [createdBy], references: [id])
+  loans       Loan[]
+
+  @@index([disbursedAt])
+  @@index([createdBy])
+  @@map("disbursements")
+}
+
+model Payment {
+  id     String  @id @default(cuid())
+  loanId String
+  amount Decimal @db.Decimal(12, 2)
+
+  // Desglose transaccional - Contabilidad basada en flujo de caja
+  principalPaid Decimal @default(0) @db.Decimal(12, 2)
+  interestPaid  Decimal @default(0) @db.Decimal(12, 2)
+  lateFeePaid   Decimal @default(0) @db.Decimal(12, 2)
+
+  paymentDate     DateTime
+  paymentMethod   PaymentMethod @default(CASH)
+  voucherPhotoUrl String?
+  receiptPdfUrl   String?
+  receiptFolio    String?       @unique
+  notes           String?
+  status          PaymentStatus @default(CONFIRMED)
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  documents       Document[]
+  creator         User          @relation("CreatedBy", fields: [createdBy], references: [id])
+  loan            Loan          @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@index([loanId])
+  @@index([paymentDate])
+  @@index([status])
+  @@index([loanId, paymentDate(sort: Desc)])
+  @@index([paymentDate, status]) // ← Optimización para agregaciones mensuales en reportes
+  @@index([status, paymentDate(sort: Desc)])
+  @@index([loanId, status, paymentDate(sort: Desc)])
+  @@map("payments")
+}
+
+model MoraApplicationLog {
+  id                String              @id @default(cuid())
+  installmentId     String
+  loanId            String
+  moraAmountApplied Decimal             @db.Decimal(12, 2)
+  dailyRate         Decimal             @db.Decimal(5, 4)
+  daysOverdue       Int
+  applicationType   MoraApplicationType
+  appliedAt         DateTime
+  appliedByUserId   String?
+  notes             String?
+  createdAt         DateTime            @default(now())
+  appliedBy         User?               @relation("AppliedBy", fields: [appliedByUserId], references: [id])
+  installment       PaymentSchedule     @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  loan              Loan                @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@index([installmentId])
+  @@index([loanId])
+  @@index([appliedAt])
+  @@index([loanId, appliedAt(sort: Desc)])
+  @@map("mora_application_logs")
+}
+
+model BalanceSnapshot {
+  id                        String   @id @default(cuid())
+  month                     Int
+  year                      Int
+  totalPrincipalRecovered   Decimal  @db.Decimal(12, 2)
+  totalInterestCollected    Decimal  @db.Decimal(12, 2)
+  totalLateFeesCollected    Decimal  @db.Decimal(12, 2)
+  totalPrincipalOutstanding Decimal  @db.Decimal(12, 2)
+  investorShare             Decimal  @db.Decimal(12, 2)
+  adminShare                Decimal  @db.Decimal(12, 2)
+  exchangeRateApplied       Decimal? @db.Decimal(10, 4)
+  generatedAt               DateTime @default(now())
+  generatedBy               String
+  notes                     String?
+  generator                 User     @relation("GeneratedBy", fields: [generatedBy], references: [id])
+
+  @@unique([month, year])
+  @@index([generatedAt])
+  @@index([year, month])
+  @@map("balance_snapshots")
+}
+
+model SystemConfig {
+  id                      String                 @id @default(cuid())
+  defaultInterestRate     Decimal                @db.Decimal(5, 2)
+  defaultLateFeeRate      Decimal                @db.Decimal(5, 2)
+  exchangeRateNioUsd      Decimal                @db.Decimal(10, 4)
+  moraCalculationType     MoraCalculationType    @default(DAILY)
+  moraEnabled             Boolean                @default(false)
+  investorSharePercentage Decimal                @db.Decimal(5, 2)
+  adminSharePercentage    Decimal                @db.Decimal(5, 2)
+  updatedAt               DateTime               @updatedAt
+  updatedBy               String
+  notificationMode        NotificationMode       @default(MANUAL)
+  notificationsEnabled    Boolean                @default(true)
+  history                 ConfigurationHistory[]
+  updater                 User                   @relation(fields: [updatedBy], references: [id])
+
+  @@map("system_config")
+}
+
+model ConfigurationHistory {
+  id             String        @id @default(cuid())
+  parameterName  String
+  oldValue       String
+  newValue       String
+  changedBy      String
+  changedAt      DateTime      @default(now())
+  reason         String?
+  systemConfigId String?
+  changer        User          @relation(fields: [changedBy], references: [id])
+  systemConfig   SystemConfig? @relation(fields: [systemConfigId], references: [id])
+
+  @@index([parameterName])
+  @@index([changedAt])
+  @@index([parameterName, changedAt(sort: Desc)])
+  @@map("configuration_history")
+}
+
+model DailyClosingLog {
+  id                   String           @id @default(cuid())
+  executedAt           DateTime         @default(now())
+  executedBy           String
+  processedCount       Int              @default(0)
+  clientsAffected      Int              @default(0)
+  moraEnabled          Boolean
+  notificationsEnabled Boolean
+  notificationMode     NotificationMode
+  totalMoraApplied     Decimal          @default(0) @db.Decimal(12, 2)
+  notificationsSent    Int              @default(0)
+  notificationsFailed  Int              @default(0)
+  success              Boolean          @default(true)
+  errorMessage         String?
+  executionDate        DateTime         @unique @db.Date
+
+  @@index([executedAt])
+  @@index([success])
+  @@map("daily_closing_logs")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  entityType  String
+  entityId    String
+  changes     Json?
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
+  description String?
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([timestamp(sort: Desc)])
+  @@index([userId, action, timestamp(sort: Desc)])
+  @@index([entityType, entityId, timestamp(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model Document {
+  id                String         @id @default(cuid())
+  documentType      DocumentType
+  fileUrl           String
+  fileSizeBytes     Int?
+  mimeType          String?
+  relatedEntityType String
+  relatedEntityId   String
+  uploadedBy        String
+  uploadedAt        DateTime       @default(now())
+  expirationDate    DateTime?
+  notes             String?
+  isVerified        Boolean        @default(false)
+  clientProfileId   String?
+  loanId            String?
+  paymentId         String?
+  isActive          Boolean        @default(true)
+  clientProfile     ClientProfile? @relation(fields: [clientProfileId], references: [id])
+  loan              Loan?          @relation(fields: [loanId], references: [id])
+  payment           Payment?       @relation(fields: [paymentId], references: [id])
+  uploader          User           @relation("UploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([relatedEntityType, relatedEntityId])
+  @@index([documentType])
+  @@index([uploadedAt])
+  @@index([isActive])
+  @@map("documents")
+}
+
+model WhatsappNotification {
+  id                  String             @id @default(cuid())
+  clientId            String
+  phoneNumber         String
+  messageType         MessageType
+  loanId              String?
+  loanFolio           String
+  dueAmount           Decimal?           @db.Decimal(12, 2)
+  messageBody         String
+  status              NotificationStatus @default(PENDING)
+  externalMessageId   String?
+  errorMessage        String?
+  createdAt           DateTime           @default(now())
+  sentAt              DateTime?
+  deliveryConfirmedAt DateTime?
+  logs                NotificationLog[]
+  client              ClientProfile      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  loan                Loan?              @relation(fields: [loanId], references: [id])
+
+  @@index([status])
+  @@index([clientId])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@map("whatsapp_notifications")
+}
+
+model NotificationLog {
+  id                String               @id @default(cuid())
+  notificationId    String
+  externalMessageId String?
+  statusAtTime      NotificationStatus
+  deliveryStatus    DeliveryStatus
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  failureReason     String?
+  n8nResponse       Json?
+  loggedAt          DateTime             @default(now())
+  notification      WhatsappNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@index([deliveryStatus])
+  @@index([loggedAt])
+  @@index([notificationId, loggedAt(sort: Desc)])
+  @@map("notification_logs")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  COBRADOR
+  ADMIN
+}
+
+enum ApprovalType {
+  AUTOMATIC
+  MANUAL
+  BLOCKED
+}
+
+enum TransitionTrigger {
+  AUTOMATIC
+  MANUAL
+}
+
+enum LoanStatus {
+  PENDING
+  ACTIVE
+  DEFAULTED
+  PAID_OFF
+  CANCELLED
+}
+
+enum PaymentFrequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum Currency {
+  NIO
+  USD
+}
+
+enum PaymentScheduleStatus {
+  PENDING
+  PAID
+  OVERDUE
+  RESCHEDULED
+  PARTIAL
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CHECK
+  MOBILE_MONEY
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum MoraApplicationType {
+  DAILY
+  MANUAL
+}
+
+enum MoraCalculationType {
+  DAILY
+  MONTHLY
+}
+
+enum NotificationMode {
+  MANUAL
+  AUTO
+}
+
+enum DocumentType {
+  CLIENT_ID
+  CLIENT_PHOTO
+  LOAN_CONTRACT
+  PAYMENT_VOUCHER
+  RECEIPT_PDF
+  OTHER
+}
+
+enum MessageType {
+  PAYMENT_DUE_TODAY
+  PAYMENT_OVERDUE_1D
+  PAYMENT_OVERDUE_3D
+  PAYMENT_REMINDER_3D
+  PAYMENT_CONFIRMED
+  LOAN_APPROVED
+  CUSTOM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  BOUNCED
+}
+
+enum DeliveryStatus {
+  DELIVERED
+  READ
+  FAILED
+  BOUNCED
+}
