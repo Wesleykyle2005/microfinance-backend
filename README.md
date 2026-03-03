@@ -10,6 +10,7 @@ Backend del sistema integral de gestión de microcréditos.
 - [Scripts](#scripts)
 - [Arquitectura](#arquitectura)
 - [Seguridad](#seguridad)
+- [Redis Cache (Clientes)](#redis-cache-clientes)
 - [Integración n8n (WhatsApp)](#integración-n8n-whatsapp)
 - [API Routes](#api-routes)
 - [Licencia](#licencia)
@@ -113,6 +114,43 @@ BOOTSTRAP_ADMIN_SECRET=secreto_unico_bootstrap
 5. Reiniciar servicio.
 
 > La ruta está protegida adicionalmente por rate limiter dedicado.
+
+## Redis Cache (Clientes)
+
+Implementación actual de caché con Redis para endpoints `GET` de clientes.
+
+### Activación
+
+```env
+REDIS_URL=redis://localhost:6379
+```
+
+Levantar Redis local:
+
+```bash
+docker compose up -d redis
+```
+
+### Comportamiento
+- Solo cachea respuestas exitosas (`success: true`) de endpoints `GET` de clientes.
+- TTL por defecto en clientes: `120` segundos.
+- Se expone header `X-Cache` con valores `HIT` o `MISS`.
+- Si Redis no está disponible, el flujo continúa sin caché (no rompe la API).
+
+### Endpoints cacheados
+- `GET /api/clients`
+- `GET /api/clients/options`
+- `GET /api/clients/stats`
+- `GET /api/clients/:id`
+- `GET /api/clients/:id/scoring/history`
+
+### Invalidación
+
+Se invalida el namespace `clients` después de mutaciones exitosas en:
+- `POST /api/clients`
+- `PATCH /api/clients/:id`
+- `DELETE /api/clients/:id`
+- `POST /api/clients/:id/scoring/recalculate`
 
 ## Integración n8n (WhatsApp)
 
