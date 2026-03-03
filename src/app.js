@@ -87,9 +87,14 @@ app.use((req, res, next) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-    console.error('[Error Handler]:', err);
-
     const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
+    const isExpectedAuthError = statusCode === 401 || statusCode === 403;
+
+    if (!isExpectedAuthError) {
+        console.error('[Error Handler]:', err);
+    } else if (process.env.NODE_ENV === 'development') {
+        console.warn(`[Auth] ${statusCode} ${req.method} ${req.originalUrl}: ${err.message}`);
+    }
 
     res.status(statusCode).json({
         status: 'error',
